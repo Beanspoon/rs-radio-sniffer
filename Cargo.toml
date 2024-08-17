@@ -1,0 +1,15 @@
+[package]
+name = "rs-radio-sniffer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m-rt = "0.7.3"
+nrf52832-hal = { version = "0.18.0", features = ["rt"] }
+panic-halt = "0.2.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

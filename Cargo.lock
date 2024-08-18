@@ -229,7 +229,9 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 name = "rs-radio-sniffer"
 version = "0.1.0"
 dependencies = [
+ "cortex-m",
  "cortex-m-rt",
+ "embedded-hal 1.0.0",
  "nrf52832-hal",
  "panic-halt",
 ]

@@ -1,26 +1,96 @@
 #![no_std]
 #![no_main]
 
-use nrf52832_hal as hal;
-use rtt_target::{debug_rprintln, rprintln};
+use core::cell::RefCell;
+
+use cortex_m::interrupt::{CriticalSection, Mutex};
+use nrf52832_hal::{self as hal, pac::Peripherals};
+use rtt_target::{debug_rprintln, rprint, rprintln};
+
+use hal::pac::interrupt;
 
 extern crate panic_halt;
 
+struct Packet {
+    length: u8,
+    payload: [u8; 255],
+}
+
+static mut PACKET: Packet = Packet {
+    length: 0,
+    payload: [0; 255],
+};
+
+static P: Mutex<RefCell<Option<Peripherals>>> = Mutex::new(RefCell::new(None));
+
+#[interrupt]
+unsafe fn RADIO() {
+    static mut COUNTER: u32 = 0;
+
+    rprintln!(
+        "[{}] l: {}; {:02x?}",
+        COUNTER,
+        PACKET.length,
+        &PACKET.payload[..PACKET.length as usize]
+    );
+    *COUNTER += 1;
+
+    let cs = unsafe { CriticalSection::new() };
+    if let Some(peripherals) = P.borrow(&cs).take() {
+        peripherals.RADIO.events_end.write(|w| unsafe { w.bits(0) });
+        P.borrow(&cs).replace(Some(peripherals));
+    }
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    rtt_target::rtt_init_default!();
+    rtt_target::rtt_init_print!();
     rprintln!("*** Rust-powered radio sniffer ***");
 
     let peripherals = hal::pac::Peripherals::take().unwrap();
 
+    rprint!("Starting HF clock...");
+    peripherals
+        .CLOCK
+        .tasks_hfclkstart
+        .write(|w| unsafe { w.bits(1) });
+
+    while peripherals.CLOCK.hfclkstat.read().state()
+        == hal::pac::clock::hfclkstat::STATE_A::NOT_RUNNING
+    {}
+    rprintln!("started!");
+
     rprintln!("Initialising radio...");
-    radio_init(peripherals);
+    radio_init(&peripherals);
+
+    // Configure radio events
+    hal::pac::NVIC::mask(hal::pac::Interrupt::RADIO);
+    peripherals.RADIO.intenset.write(|w| w.end().set_bit());
+    unsafe { hal::pac::NVIC::unmask(hal::pac::Interrupt::RADIO) };
+
+    let packet_location = unsafe { core::ptr::addr_of!(PACKET) };
+    rprintln!("Packet address: {:?}", packet_location as u32);
+
+    peripherals
+        .RADIO
+        .packetptr
+        .write(|w| w.packetptr().variant(packet_location as u32));
+
+    let x = peripherals.RADIO.packetptr.read();
+    rprintln!("Read: {:#?}", x.bits());
+
+    peripherals.RADIO.tasks_rxen.write(|w| unsafe { w.bits(1) });
+
+    {
+        let cs = unsafe { CriticalSection::new() };
+        P.borrow(&cs).replace(Some(peripherals));
+    }
 
     loop {}
 }
 
-fn radio_init(peripherals: hal::pac::Peripherals) {
-    let radio = peripherals.RADIO;
+fn radio_init(peripherals: &hal::pac::Peripherals) {
+    let radio = &peripherals.RADIO;
     // Enable power
     radio.power.write(|w| unsafe { w.bits(1) });
 
@@ -68,10 +138,12 @@ fn radio_init(peripherals: hal::pac::Peripherals) {
     radio.crcinit.write(|w| w.crcinit().variant(0x555555));
 
     let factors = [10, 9, 6, 4, 3, 1, 0];
-    let factor_mask = 0;
-    factors
-        .iter()
-        .fold(factor_mask, |mask, factor| mask | (1 << factor));
+    let factor_mask = factors.iter().fold(0, |mask, factor| mask | (1 << factor));
     debug_rprintln!("CRC polynomial factor mask: {:#034b}", factor_mask);
     radio.crcpoly.write(|w| w.crcpoly().variant(factor_mask));
+
+    // Enable shortcuts
+    radio
+        .shorts
+        .write(|w| w.ready_start().set_bit().end_start().set_bit());
 }

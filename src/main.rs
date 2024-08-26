@@ -38,6 +38,10 @@ unsafe fn RADIO() {
     let cs = unsafe { CriticalSection::new() };
     if let Some(peripherals) = P.borrow(&cs).take() {
         peripherals.RADIO.events_end.write(|w| unsafe { w.bits(0) });
+        peripherals
+            .RADIO
+            .tasks_start
+            .write(|w| unsafe { w.bits(1) });
         P.borrow(&cs).replace(Some(peripherals));
     }
 }
@@ -143,7 +147,5 @@ fn radio_init(peripherals: &hal::pac::Peripherals) {
     radio.crcpoly.write(|w| w.crcpoly().variant(factor_mask));
 
     // Enable shortcuts
-    radio
-        .shorts
-        .write(|w| w.ready_start().set_bit().end_start().set_bit());
+    radio.shorts.write(|w| w.ready_start().set_bit());
 }

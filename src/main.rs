@@ -123,7 +123,7 @@ fn radio_init(peripherals: &hal::pac::Peripherals) {
         .write(|w| w.s0len().set_bit().s1len().variant(2).lflen().variant(6));
     radio.pcnf1.write(|w| {
         w.maxlen()
-            .variant(10)
+            .variant(255)
             .balen()
             .variant(3)
             .endian()
